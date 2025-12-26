@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Bedrock Texture Studio Beta.1</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/ace.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/mode-json.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/theme-monokai.js"></script>
+<style>
+    :root { --bg:#1e1e1e; --pnl:#252526; --hdr:#333; --acc:#007acc; --txt:#ccc; --brd:#3e3e42; --dang:#d9534f; }
+    * { box-sizing: border-box; outline: none; -webkit-tap-highlight-color: transparent; user-select: none; }
+    body { margin:0; background:var(--bg); color:var(--txt); font-family:'Segoe UI', sans-serif; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+    
+    #app { display:flex; flex:1; overflow:hidden; position:relative; }
+    
+    /* Sidebar Fix: overflow:hidden added to ensure content hides when width is 0 */
+    #sidebar { width:220px; background:var(--pnl); border-right:1px solid var(--brd); display:flex; flex-direction:column; flex-shrink:0; z-index:20; transition:width 0.2s ease; overflow:hidden; white-space:nowrap; }
+    #sidebar.closed { width:0; border:none; }
+    
+    #main { flex:1; display:flex; flex-direction:column; background:var(--bg); overflow:hidden; position:relative; min-width:0; }
+    
+    button { background:#444; border:1px solid #555; color:#fff; padding:4px 8px; cursor:pointer; border-radius:3px; font-size:12px; display:inline-flex; align-items:center; justify-content:center; }
+    button:hover { background:#555; }
+    button.pri { background:var(--acc); border-color:var(--acc); }
+    button.dang { background:var(--dang); border-color:#b52b27; }
+    button.act { background:#666; border-color:#999; box-shadow:inset 0 0 4px #000; }
+    button.sm { padding:2px 6px; font-size:10px; height:20px; }
+    input, select { background:#333; border:1px solid #555; color:#fff; padding:4px; border-radius:3px; width:100%; }
+    
+    header { height:40px; background:var(--hdr); display:flex; align-items:center; padding:0 10px; gap:10px; border-bottom:1px solid var(--brd); justify-content:space-between; }
+    footer { height:30px; background:var(--acc); display:flex; align-items:center; padding:0 10px; justify-content:space-between; font-size:11px; color:#fff; }
+
+    #tree { flex:1; overflow-y:auto; padding:5px; font-size:13px; }
+    .node { padding:3px 5px; cursor:pointer; white-space:nowrap; display:flex; align-items:center; gap:5px; }
+    .node:hover { background:#333; }
+    .indent { padding-left:18px; display:none; }
+    .indent.open { display:block; }
+    
+    #tabs { display:flex; background:var(--pnl); height:35px; overflow-x:auto; scrollbar-width:none; }
+    .tab { padding:0 15px; background:#2d2d2d; border-right:1px solid #111; display:flex; align-items:center; gap:8px; font-size:12px; cursor:pointer; min-width:fit-content; }
+    .tab.act { background:var(--bg); border-top:2px solid var(--acc); }
+    
+    #img-ui { display:none; flex-direction:column; width:100%; height:100%; }
+    #toolbar { padding:5px; background:var(--hdr); display:flex; flex-wrap:wrap; gap:5px; align-items:center; border-bottom:1px solid var(--brd); }
+    
+    #viewport { flex:1; overflow:hidden; position:relative; background:#111; cursor: default; display:flex; justify-content:center; align-items:center; }
+    #viewport::before {
+        content: ""; position: absolute; top:0; left:0; width:100%; height:100%; opacity: 0.2; pointer-events: none; z-index: 0;
+        background-image: linear-gradient(45deg, #808080 25%, transparent 25%), linear-gradient(-45deg, #808080 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #808080 75%), linear-gradient(-45deg, transparent 75%, #808080 75%);
+        background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+    }
+
+    #cvs-wrap { position:absolute; width:0; height:0; transform-origin: center center; image-rendering: pixelated; }
+    canvas { position:absolute; top:0; left:0; pointer-events:none; image-rendering: pixelated; }
+    #bg-cvs { z-index: 1; }
+    #draw-cvs { z-index: 2; } 
+    
+    #overlay-ui { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index: 100; overflow:hidden; }
+    .guideline { position:absolute; border:1px solid rgba(255,255,255,0.8); pointer-events:none; box-shadow: 0 0 2px rgba(0,0,0,0.5); z-index:101; display:none; }
+    .sel-box { position:absolute; border:1px dashed #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.5); z-index:102; display:none; pointer-events:none; }
+    .sel-handle { position:absolute; width:8px; height:8px; background:#fff; border:1px solid #000; z-index:103; pointer-events:auto; display:none; }
+    .sel-handle:hover { background:var(--acc); }
+
+    #layer-panel { position:absolute; right:10px; top:10px; width:180px; background:rgba(30,30,30,0.95); border:1px solid var(--brd); border-radius:4px; padding:5px; display:flex; flex-direction:column; gap:2px; max-height:50%; overflow-y:auto; z-index:50; }
+    .layer-item { display:flex; gap:5px; padding:4px; font-size:11px; cursor:pointer; background:#333; border:1px solid transparent; align-items:center; min-height:34px; }
+    .layer-item:hover { background:#3a3a3a; }
+    .layer-item.sel { border-color:var(--acc); background:#444; }
+    .layer-vis { width:16px; height:16px; border:1px solid #777; background:var(--acc); border-radius:2px; cursor:pointer; flex-shrink:0; display:flex; justify-content:center; align-items:center; }
+    .layer-vis.hide { background:transparent; }
+    .layer-thumb { width:24px; height:24px; background:#000; image-rendering: pixelated; border:1px solid #555; }
+    .layer-ctrls { display:flex; gap:2px; margin-left:auto; }
+
+    .modal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:200; justify-content:center; align-items:center; }
+    .box { background:var(--pnl); padding:20px; width:90%; max-width:450px; border-radius:5px; border:1px solid var(--brd); box-shadow:0 10px 25px rgba(0,0,0,0.5); }
+    .row { margin-bottom:15px; } .row label { display:block; font-size:11px; margin-bottom:5px; color:#aaa; }
+    
+    #editor-wrap { flex:1; position:relative; display:none; }
+    #ace-cnt { position:absolute; top:0; left:0; right:0; bottom:0; font-size: 16px !important; }
+    #json-tools { position:absolute; top:5px; right:20px; z-index:50; }
+</style>
+</head>
+<body>
+
+<div id="m-start" class="modal" style="display:flex">
+    <div class="box" style="text-align:center">
+        <h3>Bedrock Texture Studio Beta.1</h3>
+        <p style="font-size:12px; color:#aaa; margin-bottom:20px;">β版のため、PvP関係と一部のブロックのみ対応</p>
+        <div style="display:grid; gap:10px;">
+            <button class="pri" onclick="newProj()">新規作成</button>
+            <button onclick="document.getElementById('f-up').click()">読み込む (.mcpack/.zip)</button>
+        </div>
+        <input type="file" id="f-up" accept=".zip,.mcpack" style="display:none" onchange="loadZip(this.files[0])">
+    </div>
+</div>
+
+<div id="m-add" class="modal">
+    <div class="box">
+        <h3>画像を追加</h3>
+        <div class="row">
+            <label>名前 / ID (例: diamond_sword, stone)</label>
+            <input list="mc-list" id="add-name" onchange="detectType()">
+            <datalist id="mc-list"></datalist>
+        </div>
+        <div class="row">
+            <label>種類</label>
+            <select id="add-type"><option value="items">アイテム</option><option value="blocks">ブロック</option><option value="ui">UI</option></select>
+        </div>
+        <div class="row">
+            <label>サイズ (16x推奨)</label>
+            <select id="add-size"><option value="16">16x16</option><option value="32">32x32</option><option value="64">64x64</option><option value="128">128x128</option></select>
+        </div>
+        <div class="row" style="display:flex; align-items:center; gap:5px;">
+            <input type="checkbox" id="add-def" checked style="width:auto;">
+            <label for="add-def" style="margin:0; cursor:pointer;">デフォルト画像を読み込む</label>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+            <button onclick="ui.close('m-add')">キャンセル</button>
+            <button class="pri" onclick="addTex()">追加・生成</button>
+        </div>
+    </div>
+</div>
+
+<header>
+    <div style="display:flex; align-items:center; gap:10px">
+        <button onclick="document.getElementById('sidebar').classList.toggle('closed')">☰</button>
+        <span style="font-weight:bold; font-size:14px">Bedrock Texture Studio Beta.1</span>
+    </div>
+    <div style="display:flex; gap:5px; align-items:center">
+        <button class="sm" onclick="window.open('https://sites.google.com/view/bedrocktexturestudio-sp', '_blank')" title="ヘルプ">Help</button>
+        <button class="pri sm" onclick="ui.openAddModal()">+画像</button>
+        <button class="sm" onclick="document.getElementById('f-aud').click()">+音声</button>
+        <input type="file" id="f-aud" accept=".ogg" style="display:none" onchange="addAud(this.files[0])">
+    </div>
+</header>
+
+<div id="app">
+    <div id="sidebar">
+        <div id="tree"></div>
+    </div>
+    
+    <div id="main">
+        <div id="tabs"></div>
+        
+        <div id="img-ui">
+            <div id="toolbar">
+                <button id="btn-pen" onclick="pEditor.setTool('pen')" title="ペン (P)">✏️</button>
+                <button id="btn-ers" onclick="pEditor.setTool('ers')" title="消しゴム (E)">🧹</button>
+                <button id="btn-fil" onclick="pEditor.setTool('fil')" title="塗りつぶし (F)">🪣</button>
+                <button id="btn-pick" onclick="pEditor.setTool('pick')" title="スポイト (I)">🧪</button>
+                <div style="width:1px;height:20px;background:#555"></div>
+                <button id="btn-sel" onclick="pEditor.setTool('sel')" title="範囲選択 (S)">⬚</button>
+                <button id="btn-mov" onclick="pEditor.setTool('mov')" title="移動/変形 (M)">✥</button>
+                <div style="width:1px;height:20px;background:#555"></div>
+                
+                <div style="display:flex; flex-direction:column; align-items:center; width:50px;" title="ペンサイズ">
+                    <span style="font-size:9px">Size: <span id="pen-size-disp">1</span></span>
+                    <input type="range" min="1" max="10" value="1" oninput="pEditor.setPs(this.value)" style="width:100%">
+                </div>
+                
+                <div style="display:flex; flex-direction:column; align-items:center; width:50px;" title="許容値(塗りつぶし)">
+                    <span style="font-size:9px">Tol: <span id="tol-disp">0</span></span>
+                    <input type="range" min="0" max="100" value="0" oninput="pEditor.setTol(this.value)" style="width:100%">
+                </div>
+                
+                <input type="color" id="col-p" value="#ffffff" onchange="pEditor.color=this.value" style="width:30px;height:30px;border:none;cursor:pointer">
+                
+                <div style="flex:1"></div>
+                <button onclick="pEditor.undo()" title="Undo (Ctrl+Z)">↩️</button>
+                <button onclick="pEditor.redo()" title="Redo (Ctrl+Y)">↪️</button>
+                <button class="sm" onclick="pEditor.addLayer()">+Layer</button>
+            </div>
+            
+            <div id="viewport" oncontextmenu="return false;">
+                <div id="cvs-wrap">
+                    <canvas id="bg-cvs"></canvas>
+                    <canvas id="draw-cvs"></canvas>
+                </div>
+                <div id="overlay-ui">
+                    <div id="crs-guide" class="guideline"></div>
+                    <div id="sel-guide" class="sel-box"></div>
+                    <div id="h-nw" class="sel-handle" style="cursor:nw-resize"></div>
+                    <div id="h-ne" class="sel-handle" style="cursor:ne-resize"></div>
+                    <div id="h-sw" class="sel-handle" style="cursor:sw-resize"></div>
+                    <div id="h-se" class="sel-handle" style="cursor:se-resize"></div>
+                </div>
+                
+                <div id="layer-panel">
+                    <div style="font-size:10px; border-bottom:1px solid #555; padding-bottom:4px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center;">
+                        <span>レイヤー</span>
+                        <div style="display:flex; gap:5px; align-items:center;">
+                            <button class="sm" title="画像をレイヤーとして読み込む" onclick="document.getElementById('lay-up').click()">📂</button>
+                            <input type="file" id="lay-up" accept="image/*" style="display:none" onchange="if(this.files[0]) pEditor.loadImgLayer(this.files[0]); this.value='';">
+                            <span id="layer-count" style="color:#aaa"></span>
+                        </div>
+                    </div>
+                    <div id="layer-list"></div>
+                </div>
+                <div style="position:absolute; bottom:5px; left:5px; font-size:10px; color:#aaa; pointer-events:none; z-index:200; text-shadow:1px 1px 1px #000;">
+                    右クリック: 視点移動 / ホイール: ズーム<br>Ctrl+C/V: コピー/貼付 / Drag&Drop: 画像追加
+                </div>
+            </div>
+        </div>
+
+        <div id="editor-wrap">
+            <div id="json-tools">
+                <button class="sm" onclick="regenUUID()">UUID更新</button>
+            </div>
+            <div id="ace-cnt"></div>
+        </div>
+    </div>
+</div>
+
+<footer>
+    <span id="stat-msg">Ready</span>
+    <div style="display:flex; gap:5px">
+        <button class="pri sm" onclick="exportPack('zip')">保存 (.zip)</button>
+        <button class="pri sm" onclick="exportPack('mcpack')">出力 (.mcpack)</button>
+    </div>
+</footer>
+
+<script>
+const MC_DB = [
+    {n:"Netherite Helmet",i:"netherite_helmet",t:"items"},
+    {n:"Netherite Chestplate",i:"netherite_chestplate",t:"items"},
+    {n:"Netherite Leggings",i:"netherite_leggings",t:"items"},
+    {n:"Netherite Boots",i:"netherite_boots",t:"items"},
+    {n:"Diamond Helmet",i:"diamond_helmet",t:"items"},
+    {n:"Diamond Chestplate",i:"diamond_chestplate",t:"items"},
+    {n:"Diamond Leggings",i:"diamond_leggings",t:"items"},
+    {n:"Diamond Boots",i:"diamond_boots",t:"items"},
+    {n:"Iron Helmet",i:"iron_helmet",t:"items"},
+    {n:"Iron Chestplate",i:"iron_chestplate",t:"items"},
+    {n:"Iron Leggings",i:"iron_leggings",t:"items"},
+    {n:"Iron Boots",i:"iron_boots",t:"items"},
+    {n:"Golden Helmet",i:"gold_helmet",t:"items"},
+    {n:"Golden Chestplate",i:"gold_chestplate",t:"items"},
+    {n:"Golden Leggings",i:"gold_leggings",t:"items"},
+    {n:"Golden Boots",i:"gold_boots",t:"items"},
+    {n:"Chainmail Helmet",i:"chainmail_helmet",t:"items"},
+    {n:"Chainmail Chestplate",i:"chainmail_chestplate",t:"items"},
+    {n:"Chainmail Leggings",i:"chainmail_leggings",t:"items"},
+    {n:"Chainmail Boots",i:"chainmail_boots",t:"items"},
+    {n:"Leather Helmet",i:"leather_helmet",t:"items"},
+    {n:"Leather Chestplate",i:"leather_chestplate",t:"items"},
+    {n:"Leather Leggings",i:"leather_leggings",t:"items"},
+    {n:"Leather Boots",i:"leather_boots",t:"items"},
+    {n:"Netherite Sword",i:"netherite_sword",t:"items"},
+    {n:"Netherite Pickaxe",i:"netherite_pickaxe",t:"items"},
+    {n:"Netherite Axe",i:"netherite_axe",t:"items"},
+    {n:"Diamond Sword",i:"diamond_sword",t:"items"},
+    {n:"Diamond Pickaxe",i:"diamond_pickaxe",t:"items"},
+    {n:"Diamond Axe",i:"diamond_axe",t:"items"},
+    {n:"Iron Sword",i:"iron_sword",t:"items"},
+    {n:"Iron Pickaxe",i:"iron_pickaxe",t:"items"},
+    {n:"Iron Axe",i:"iron_axe",t:"items"},
+    {n:"Golden Apple",i:"apple_golden",t:"items"},
+    {n:"Enchanted Golden Apple",i:"apple_golden_enchanted",t:"items"},
+    {n:"Ender Pearl",i:"ender_pearl",t:"items"},
+    {n:"Totem of Undying",i:"totem",t:"items"},
+    {n:"Bow",i:"bow_standby",t:"items"},
+    {n:"Crossbow",i:"crossbow_standby",t:"items"},
+    {n:"Arrow",i:"arrow",t:"items"},
+    {n:"Shield",i:"shield",t:"items"},
+    {n:"Wind Charge",i:"wind_charge",t:"items"},
+    {n:"Mace",i:"mace",t:"items"},
+    {n:"Cobweb",i:"web",t:"blocks"},
+    {n:"Obsidian",i:"obsidian",t:"blocks"},
+    {n:"End Crystal",i:"end_crystal",t:"items"},
+    {n:"Experience Bottle",i:"experience_bottle",t:"items"},
+    {n:"Splash Potion",i:"potion_bottle_splash",t:"items"},
+    {n:"Water Bucket",i:"bucket_water",t:"items"},
+    {n:"Grass Block",i:"grass_side_carried",t:"blocks"},
+    {n:"Dirt",i:"dirt",t:"blocks"},
+    {n:"Cobblestone",i:"cobblestone",t:"blocks"},
+    {n:"Stone",i:"stone",t:"blocks"},
+    {n:"Smooth Stone",i:"smooth_stone",t:"blocks"},
+    {n:"Bedrock",i:"bedrock",t:"blocks"},
+    {n:"Oak Log",i:"log_oak",t:"blocks"},
+    {n:"Oak Planks",i:"planks_oak",t:"blocks"},
+    {n:"Spruce Planks",i:"planks_spruce",t:"blocks"},
+    {n:"Birch Planks",i:"planks_birch",t:"blocks"},
+    {n:"Glass",i:"glass",t:"blocks"},
+    {n:"White Wool",i:"wool_colored_white",t:"blocks"},
+    {n:"Red Wool",i:"wool_colored_red",t:"blocks"},
+    {n:"Blue Wool",i:"wool_colored_blue",t:"blocks"},
+    {n:"Coal Ore",i:"coal_ore",t:"blocks"},
+    {n:"Iron Ore",i:"iron_ore",t:"blocks"},
+    {n:"Gold Ore",i:"gold_ore",t:"blocks"},
+    {n:"Diamond Ore",i:"diamond_ore",t:"blocks"},
+    {n:"Deepslate Diamond Ore",i:"deepslate_diamond_ore",t:"blocks"},
+    {n:"Netherite Block",i:"netherite_block",t:"blocks"},
+    {n:"Obsidian",i:"obsidian",t:"blocks"},
+    {n:"Crying Obsidian",i:"crying_obsidian",t:"blocks"},
+    {n:"Glowstone",i:"glowstone",t:"blocks"},
+    {n:"Sea Lantern",i:"sea_lantern",t:"blocks"},
+    {n:"Sand",i:"sand",t:"blocks"},
+    {n:"Gravel",i:"gravel",t:"blocks"},
+    {n:"Ice",i:"ice",t:"blocks"},
+    {n:"Packed Ice",i:"ice_packed",t:"blocks"},
+    {n:"Blue Ice",i:"blue_ice",t:"blocks"},
+    {n:"Slime Block",i:"slime",t:"blocks"},
+    {n:"Honey Block",i:"honey_block_side",t:"blocks"},
+    {n:"Web",i:"web",t:"blocks"},
+    {n:"TNT",i:"tnt_side",t:"blocks"},
+    {n:"Bookshelf",i:"bookshelf",t:"blocks"},
+    {n:"Chest",i:"chest_inventory",t:"blocks"},
+    {n:"Crafting Table",i:"crafting_table_front",t:"blocks"},
+    {n:"Furnace",i:"furnace_front_off",t:"blocks"},
+    {n:"Anvil",i:"anvil_top_damaged_0",t:"blocks"},
+    {n:"Enchanting Table",i:"enchanting_table_side",t:"blocks"},
+    {n:"Beacon",i:"beacon",t:"blocks"},
+    {n:"Sponge",i:"sponge",t:"blocks"},
+    {n:"Netherrack",i:"netherrack",t:"blocks"},
+    {n:"Soul Sand",i:"soul_sand",t:"blocks"},
+    {n:"Soul Soil",i:"soul_soil",t:"blocks"},
+    {n:"Magma Block",i:"magma",t:"blocks"},
+    {n:"End Stone",i:"end_stone",t:"blocks"},
+    {n:"End Stone Bricks",i:"end_bricks",t:"blocks"},
+    {n:"Purpur Block",i:"purpur_block",t:"blocks"},
+    {n:"Trial Spawner",i:"trial_spawner_top",t:"blocks"},
+    {n:"Vault",i:"vault_side_off",t:"blocks"}
+];
+
+const fs = {};
+let tabs = [];
+let curPath = null;
+let aceEd = null;
+
+const ui = {
+    open: id => document.getElementById(id).style.display = 'flex',
+    close: id => document.getElementById(id).style.display = 'none',
+    openAddModal: () => { document.getElementById('add-name').value=''; ui.open('m-add'); }
+};
+
+function uuid() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random()*16|0, v = c=='x'?r:(r&0x3|0x8);
+        return v.toString(16);
+    });
+}
+
+// Exit Confirmation
+window.addEventListener('beforeunload', (e) => {
+    e.preventDefault();
+    e.returnValue = ''; // Shows standard browser dialog
+});
+
+window.onload = () => {
+    aceEd = ace.edit("ace-cnt");
+    aceEd.setTheme("ace/theme/monokai");
+    aceEd.session.setMode("ace/mode/json");
+    aceEd.setOptions({ fontSize: "16px", wrap: true });
+    aceEd.on('change', () => { if(curPath && fs[curPath].type==='text') fs[curPath].content = aceEd.getValue(); });
+    
+    const dl = document.getElementById('mc-list');
+    MC_DB.forEach(item => { const op=document.createElement('option'); op.value=item.n; dl.appendChild(op); });
+
+    pEditor.init();
+
+    window.addEventListener('paste', e => {
+        if(!pEditor.active) return;
+        const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+        for (let item of items) {
+            if (item.kind === 'file' && item.type.startsWith('image')) {
+                const blob = item.getAsFile();
+                pEditor.loadImgLayer(blob);
+            }
+        }
+    });
+
+    document.addEventListener('keydown', e => {
+        if(!pEditor.active) return;
+        if(e.ctrlKey && e.key==='z') { e.preventDefault(); pEditor.undo(); }
+        if(e.ctrlKey && e.key==='y') { e.preventDefault(); pEditor.redo(); }
+        if(e.ctrlKey && e.key==='c') { e.preventDefault(); pEditor.copy(); }
+        if(e.key === 'Delete') { pEditor.delCurLayer(); }
+        if(e.key.toLowerCase() === 'p') pEditor.setTool('pen');
+        if(e.key.toLowerCase() === 'e') pEditor.setTool('ers');
+        if(e.key.toLowerCase() === 'm') pEditor.setTool('mov');
+        if(e.key.toLowerCase() === 's') pEditor.setTool('sel');
+        if(e.key.toLowerCase() === 'f') pEditor.setTool('fil');
+    });
+};
+
+function detectType() {
+    const val = document.getElementById('add-name').value;
+    const found = MC_DB.find(i => i.n === val);
+    if(found) document.getElementById('add-type').value = found.t;
+}
+
+// --- FS Operations ---
+async function addTex() {
+    const val = document.getElementById('add-name').value.trim();
+    if(!val) return;
+    let id = val, type = document.getElementById('add-type').value;
+    const found = MC_DB.find(i => i.n === val);
+    if(found) { id = found.i; type = found.t; }
+    else { id = val.toLowerCase().replace(/\s+/g, '_'); }
+
+    const size = parseInt(document.getElementById('add-size').value);
+    const useDef = document.getElementById('add-def').checked; // Checkbox State
+    
+    const path = `textures/${type}/${id}.png`;
+    ui.close('m-add');
+    
+    let blob;
+    if (useDef) {
+        try {
+            const url = `https://raw.githubusercontent.com/KygekDev/default-textures/master/textures/${type}/${id}.png`;
+            const res = await fetch(url);
+            if(res.ok) blob = await resizeImage(await res.blob(), size);
+            else throw new Error("Not Found");
+        } catch { blob = await blnk(size); }
+    } else {
+        blob = await blnk(size);
+    }
+    
+    fs[path] = { type: 'image', content: blob, editorData: null };
+    mkDir(`textures/${type}`);
+    renderTree();
+    openTab(path);
+}
+
+function resizeImage(blob, size) {
+    return new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => {
+            const c = document.createElement('canvas'); c.width=size; c.height=size;
+            const ctx = c.getContext('2d'); ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(img, 0, 0, size, size);
+            c.toBlob(resolve);
+        };
+        img.src = URL.createObjectURL(blob);
+    });
+}
+function addAud(f) { if(!f)return; mkDir("sounds"); fs["sounds/"+f.name]={type:'audio',content:f}; renderTree(); }
+function blnk(s) { const c=document.createElement('canvas');c.width=s;c.height=s;return new Promise(r=>c.toBlob(r)); }
+function mkDir(path) { let acc=""; path.split('/').forEach(p=>{acc+=p+"/";fs[acc]={isDir:true}}); }
+
+function newProj() {
+    ui.close('m-start');
+    const m = { "format_version": 2, "header": { "name": "My Pack", "description": "Created with Bedrock Texture Studio", "uuid": uuid(), "version": [1,0,0], "min_engine_version": [1,16,0] }, "modules": [ { "type": "resources", "uuid": uuid(), "version": [1,0,0] } ] };
+    fs["manifest.json"] = { type: 'text', content: JSON.stringify(m, null, 4) };
+    fs["pack_icon.png"] = { type: 'image', content: null };
+    blnk(64).then(b => fs["pack_icon.png"].content = b);
+    mkDir("textures/items");
+    renderTree();
+}
+
+async function loadZip(file) {
+    if(!file) return;
+    ui.close('m-start');
+    const zip = await JSZip.loadAsync(file);
+    Object.keys(fs).forEach(k => delete fs[k]);
+    tabs = []; curPath = null; renderTabs();
+    for(const k in zip.files) {
+        if(zip.files[k].dir) { fs[k] = { isDir: true }; } 
+        else {
+            const ext = k.split('.').pop().toLowerCase();
+            let type = 'text', content = await zip.files[k].async(ext.match(/png|jpg/) ? 'blob' : (ext.match(/ogg|wav/) ? 'blob' : 'string'));
+            if(ext.match(/png|jpg/)) type = 'image';
+            if(ext.match(/ogg|wav/)) type = 'audio';
+            fs[k] = { type, content, editorData: null };
+        }
+    }
+    renderTree();
+}
+
+async function exportPack(type) {
+    if(curPath && fs[curPath].type==='image') {
+        await pEditor.saveToFs(fs[curPath]);
+    }
+    for (const p of tabs) {
+        if (p !== curPath && fs[p].type === 'image' && fs[p].editorData) {
+            const ed = fs[p].editorData;
+            const t = document.createElement('canvas'); t.width = ed.w; t.height = ed.h;
+            const ctx = t.getContext('2d');
+            for(const l of ed.layers) {
+                if(l.vis) {
+                     const img = new Image(); img.src = l.d;
+                     await new Promise(r=>img.onload=r);
+                     ctx.drawImage(img,0,0);
+                }
+            }
+            fs[p].content = await new Promise(r=>t.toBlob(r));
+        }
+    }
+
+    const zip = new JSZip();
+    for(const p in fs) { 
+        if(!fs[p].isDir && fs[p].content) zip.file(p, fs[p].content); 
+    }
+    const b = await zip.generateAsync({type:"blob"});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = "Pack."+type; a.click();
+}
+
+function renderTree() {
+    const tr = document.getElementById('tree'); tr.innerHTML = '';
+    const roots = {};
+    Object.keys(fs).sort().forEach(p => {
+        const parts = p.split('/').filter(x=>x);
+        let curr = roots;
+        parts.forEach((part, i) => {
+            if(!curr[part]) curr[part] = { _path: p, _kids: {} };
+            if(i === parts.length-1 && !fs[p].isDir) curr[part]._file = true;
+            curr = curr[part]._kids;
+        });
+    });
+    const build = (obj, pEl) => {
+        for(const k in obj) {
+            if(k.startsWith('_')) continue;
+            const item = obj[k];
+            const d = document.createElement('div'); d.className = 'node';
+            if(item._file) {
+                const f = fs[item._path];
+                const ico = f.type=='image'?'🖼️':f.type=='audio'?'🎵':'📄';
+                d.innerHTML = `${ico} ${k}`;
+                d.onclick = () => openTab(item._path);
+                pEl.appendChild(d);
+            } else {
+                d.innerHTML = '📁 ' + k;
+                const sub = document.createElement('div'); sub.className = 'indent';
+                d.onclick = (e) => { e.stopPropagation(); sub.classList.toggle('open'); d.innerHTML = (sub.classList.contains('open')?'📂 ':'📁 ')+k; };
+                pEl.appendChild(d); pEl.appendChild(sub);
+                build(item._kids, sub);
+            }
+        }
+    };
+    build(roots, tr);
+}
+
+async function openTab(p) {
+    if(curPath === p) return;
+    if(curPath && fs[curPath].type === 'image') {
+        fs[curPath].editorData = pEditor.exportMemory();
+    }
+    if(!tabs.includes(p)) tabs.push(p);
+    curPath = p; renderTabs();
+    
+    const f = fs[p];
+    document.getElementById('editor-wrap').style.display = f.type=='text'?'block':'none';
+    document.getElementById('img-ui').style.display = f.type=='image'?'flex':'none';
+    
+    if(f.type=='text') { 
+        aceEd.setValue(f.content, -1); pEditor.active = false;
+        document.getElementById('json-tools').style.display = p.endsWith('.json')?'block':'none';
+    } else if(f.type=='image') { 
+        if(f.editorData) {
+            await pEditor.loadFromMemory(f.editorData);
+        } else {
+            await pEditor.load(f.content); 
+        }
+    }
+    else { pEditor.active = false; }
+}
+
+function renderTabs() {
+    const c = document.getElementById('tabs'); c.innerHTML='';
+    tabs.forEach(p => {
+        const d = document.createElement('div'); d.className = `tab ${curPath==p?'act':''}`;
+        d.innerHTML = `<span>${p.split('/').pop()}</span><span onclick="closeTab('${p}', event)">×</span>`;
+        d.onclick = (e) => { if(e.target.innerText!=='×') openTab(p); };
+        c.appendChild(d);
+    });
+}
+
+async function closeTab(p, e) {
+    e.stopPropagation();
+    if(p===curPath && fs[p].type==='image') {
+         await pEditor.saveToFs(fs[p]); 
+    }
+    tabs = tabs.filter(x=>x!==p);
+    if(curPath===p) {
+        curPath = tabs.length ? tabs[tabs.length-1] : null;
+        if(curPath) openTab(curPath);
+        else { document.getElementById('editor-wrap').style.display='none'; document.getElementById('img-ui').style.display='none'; curPath=null; }
+    } else renderTabs();
+}
+
+function regenUUID() {
+    try {
+        const d = JSON.parse(aceEd.getValue());
+        if(d.header) d.header.uuid = uuid();
+        if(d.modules) d.modules.forEach(m=>m.uuid=uuid());
+        aceEd.setValue(JSON.stringify(d,null,4),-1);
+        alert("UUID Updated");
+    } catch(e) { alert("Invalid JSON"); }
+}
+
+// ==========================================
+// V6 Editor Logic
+// ==========================================
+const pEditor = {
+    wrap: document.getElementById('cvs-wrap'),
+    dCvs: document.getElementById('draw-cvs'),
+    bCvs: document.getElementById('bg-cvs'),
+    vp: document.getElementById('viewport'),
+    
+    w:0, h:0, zoom:10, tX:0, tY:0,
+    layers:[], curL:0, tool:'pen', color:'#ffffff', ps:1, tol:0,
+    active:false, history:[], histIdx:0,
+    sel: null, isDown:false, isPan:false, lastP:{x:0,y:0},
+    dragMode: null, resizeHandle: null,
+
+    init() {
+        this.vp.addEventListener('mousedown', e => this.onDown(e));
+        window.addEventListener('mousemove', e => this.onMove(e));
+        window.addEventListener('mouseup', e => this.onUp(e));
+        this.vp.addEventListener('wheel', e => this.onWheel(e));
+        this.vp.addEventListener('dragover', e => e.preventDefault());
+        this.vp.addEventListener('drop', e => {
+            e.preventDefault();
+            if(e.dataTransfer.files[0]) this.loadImgLayer(e.dataTransfer.files[0]);
+        });
+        this.dCvs.getContext('2d').imageSmoothingEnabled = false;
+    },
+
+    exportMemory() {
+        this.commitSel();
+        return {
+            w: this.w, h: this.h,
+            layers: this.layers.map(l => ({d: l.cvs.toDataURL(), vis: l.vis})),
+            curL: this.curL,
+            history: this.history,
+            histIdx: this.histIdx
+        };
+    },
+
+    async loadFromMemory(data) {
+        this.active = true;
+        this.w = data.w; this.h = data.h;
+        this.resizeCvs();
+        this.layers = await Promise.all(data.layers.map(async l => {
+            const c = this.mkCvs(); const i = new Image(); i.src = l.d;
+            await new Promise(r => i.onload = r);
+            c.getContext('2d').drawImage(i,0,0); return {cvs:c, vis:l.vis};
+        }));
+        this.curL = data.curL; this.history = data.history; this.histIdx = data.histIdx;
+        this.sel = null; this.zoom = 10; this.tX = 0; this.tY = 0;
+        this.render(); this.uiLayers(); this.updateTrans();
+        document.getElementById('stat-msg').textContent = `${this.w}x${this.h} - Restored`;
+    },
+
+    async load(blobContent) {
+        this.active = true; this.history = []; this.sel = null;
+        this.zoom = 10; this.tX = 0; this.tY = 0;
+        const img = new Image(); img.src = URL.createObjectURL(blobContent);
+        await new Promise(r => img.onload = r);
+        this.w = img.width; this.h = img.height;
+        this.resizeCvs();
+        const c = this.mkCvs(); c.getContext('2d').drawImage(img,0,0);
+        this.layers = [{cvs:c, vis:true}];
+        this.curL = 0;
+        this.render(); this.uiLayers(); this.saveState();
+        document.getElementById('stat-msg').textContent = `${this.w}x${this.h} - Ready`;
+    },
+
+    resizeCvs() {
+        [this.dCvs, this.bCvs].forEach(c => { c.width=this.w; c.height=this.h; });
+        this.wrap.style.width = this.w + 'px'; this.wrap.style.height = this.h + 'px';
+        this.drawChecker(); this.updateTrans();
+    },
+
+    async saveToFs(fileObj) {
+        this.commitSel(); 
+        const t = this.mkCvs(); const c = t.getContext('2d');
+        this.layers.forEach(l=>{if(l.vis)c.drawImage(l.cvs,0,0)});
+        fileObj.content = await new Promise(r=>t.toBlob(r));
+        fileObj.editorData = this.exportMemory();
+    },
+
+    fill(startX, startY) {
+        const ctx = this.layers[this.curL].cvs.getContext('2d');
+        const imgData = ctx.getImageData(0, 0, this.w, this.h);
+        const data = imgData.data;
+        const targetR = parseInt(this.color.slice(1,3), 16);
+        const targetG = parseInt(this.color.slice(3,5), 16);
+        const targetB = parseInt(this.color.slice(5,7), 16);
+        const sPos = (startY * this.w + startX) * 4;
+        const sr = data[sPos], sg = data[sPos+1], sb = data[sPos+2], sa = data[sPos+3];
+        if (Math.abs(sr-targetR)<=this.tol && Math.abs(sg-targetG)<=this.tol && Math.abs(sb-targetB)<=this.tol && sa===255) return;
+        const stack = [[startX, startY]];
+        const done = new Uint8Array(this.w * this.h);
+        const match = (idx) => {
+            const r = data[idx], g = data[idx+1], b = data[idx+2], a = data[idx+3];
+            const diff = Math.abs(r-sr) + Math.abs(g-sg) + Math.abs(b-sb) + Math.abs(a-sa);
+            return diff <= (this.tol * 3);
+        };
+        while (stack.length) {
+            const [x, y] = stack.pop();
+            const idx = (y * this.w + x) * 4;
+            const pos = y * this.w + x;
+            if (done[pos]) continue;
+            if (match(idx)) {
+                data[idx] = targetR; data[idx+1] = targetG; data[idx+2] = targetB; data[idx+3] = 255;
+                done[pos] = 1;
+                if(x > 0) stack.push([x-1, y]); if(x < this.w-1) stack.push([x+1, y]);
+                if(y > 0) stack.push([x, y-1]); if(y < this.h-1) stack.push([x, y+1]);
+            }
+        }
+        ctx.putImageData(imgData, 0, 0);
+        this.render(); this.saveState();
+    },
+
+    draw(p) {
+        if (this.tool === 'fil') { this.fill(p.x, p.y); return; }
+        const ctx = this.layers[this.curL].cvs.getContext('2d');
+        const off = Math.floor(this.ps/2);
+        ctx.fillStyle = this.color;
+        for(let x=0;x<this.ps;x++) for(let y=0;y<this.ps;y++) {
+            const tx=p.x-off+x, ty=p.y-off+y;
+            if(this.tool==='ers') ctx.clearRect(tx,ty,1,1);
+            else ctx.fillRect(tx,ty,1,1);
+        }
+        this.render();
+    },
+
+    mkCvs() { const c=document.createElement('canvas');c.width=this.w;c.height=this.h;return c; },
+    drawChecker() { const x=this.bCvs.getContext('2d');x.fillStyle='#ccc';x.fillRect(0,0,this.w,this.h);x.fillStyle='#fff';for(let i=0;i<this.h;i++)for(let j=0;j<this.w;j++)if((i+j)%2==0)x.fillRect(j,i,1,1); },
+    updateTrans() { this.wrap.style.transform=`translate(${this.tX}px,${this.tY}px) scale(${this.zoom})`; this.updateOverlays(); },
+    getPt(e) { const r=this.vp.getBoundingClientRect(); return {x:Math.floor((e.clientX-(r.width/2+r.left)-this.tX)/this.zoom+this.w/2), y:Math.floor((e.clientY-(r.height/2+r.top)-this.tY)/this.zoom+this.h/2)}; },
+    
+    onDown(e) {
+        if(e.button===2){this.isPan=true;this.lastP={x:e.clientX,y:e.clientY};return;}
+        if(e.button!==0)return;
+        const p=this.getPt(e); this.isDown=true;
+        if(e.target.classList.contains('sel-handle')){ this.dragMode='sel_resize'; this.resizeHandle=e.target.id.split('-')[1]; return; }
+        if(this.tool==='sel'){ if(this.sel)this.commitSel(); this.sel={x:p.x,y:p.y,w:0,h:0,ox:p.x,oy:p.y}; this.dragMode='sel_create'; }
+        else if(this.tool==='mov'){ if(this.sel&&this.inSel(p)){ if(!this.sel.float)this.liftSel(); this.dragMode='sel_move'; this.dragOff={x:p.x-this.sel.x,y:p.y-this.sel.y}; } else { if(this.sel)this.commitSel(); } }
+        else if(this.tool==='pick'){ this.commitSel(); this.pickColor(p); }
+        else { this.commitSel(); this.dragMode='draw'; this.draw(p); }
+        this.updateOverlays();
+    },
+    onMove(e) {
+        if(this.isPan){ this.tX+=e.clientX-this.lastP.x; this.tY+=e.clientY-this.lastP.y; this.lastP={x:e.clientX,y:e.clientY}; this.updateTrans(); return; }
+        const p=this.getPt(e); this.cursorHover(p); if(!this.isDown)return;
+        if(this.dragMode==='sel_create'){ this.sel.w=p.x-this.sel.ox+(p.x>=this.sel.ox?1:0); this.sel.h=p.y-this.sel.oy+(p.y>=this.sel.oy?1:0); }
+        else if(this.dragMode==='sel_move'){ this.sel.x=p.x-this.dragOff.x; this.sel.y=p.y-this.dragOff.y; }
+        else if(this.dragMode==='sel_resize'){ if(this.resizeHandle.includes('e'))this.sel.w=p.x-this.sel.x; if(this.resizeHandle.includes('s'))this.sel.h=p.y-this.sel.y; if(this.resizeHandle.includes('w')){const o=this.sel.x+this.sel.w;this.sel.x=p.x;this.sel.w=o-p.x;} if(this.resizeHandle.includes('n')){const o=this.sel.y+this.sel.h;this.sel.y=p.y;this.sel.h=o-p.y;} }
+        else if(this.dragMode==='draw'){ this.draw(p); }
+        this.updateOverlays();
+    },
+    onUp(e) {
+        this.isPan=false; if(this.isDown){ this.isDown=false; if(this.dragMode==='sel_create'){ if(this.sel.w<0){this.sel.x+=this.sel.w;this.sel.w*=-1;} if(this.sel.h<0){this.sel.y+=this.sel.h;this.sel.h*=-1;} if(!this.sel.w||!this.sel.h)this.sel=null; else this.setTool('mov'); } else if(this.dragMode==='draw'||this.tool==='fil') this.saveState(); this.dragMode=null; } this.render(); this.updateOverlays();
+    },
+    onWheel(e) { e.preventDefault(); const d=e.deltaY<0?1.1:0.9; const oz=this.zoom; this.zoom=Math.max(0.5,Math.min(100,this.zoom*d)); this.tX*=this.zoom/oz; this.tY*=this.zoom/oz; this.updateTrans(); },
+
+    pickColor(p){ const c=document.createElement('canvas');c.width=1;c.height=1;const x=c.getContext('2d');this.layers.forEach(l=>{if(l.vis)x.drawImage(l.cvs,-p.x,-p.y)});const d=x.getImageData(0,0,1,1).data;this.color="#"+[d[0],d[1],d[2]].map(v=>v.toString(16).padStart(2,'0')).join('');document.getElementById('col-p').value=this.color;this.setTool('pen'); },
+    liftSel(){ if(!this.sel||this.sel.float)return; const x=this.layers[this.curL].cvs.getContext('2d'); this.sel.float=document.createElement('canvas');this.sel.float.width=this.sel.w;this.sel.float.height=this.sel.h;this.sel.float.getContext('2d').drawImage(this.layers[this.curL].cvs,this.sel.x,this.sel.y,this.sel.w,this.sel.h,0,0,this.sel.w,this.sel.h);x.clearRect(this.sel.x,this.sel.y,this.sel.w,this.sel.h);this.render(); },
+    commitSel(){ if(this.sel&&this.sel.float){ this.layers[this.curL].cvs.getContext('2d').drawImage(this.sel.float,this.sel.x,this.sel.y,this.sel.w,this.sel.h); this.saveState(); } this.sel=null; this.render(); this.updateOverlays(); },
+    copy(){ if(!this.sel)return; const c=document.createElement('canvas');c.width=this.sel.w;c.height=this.sel.h; const s=this.sel.float?this.sel.float:this.layers[this.curL].cvs; const sx=this.sel.float?0:this.sel.x; const sy=this.sel.float?0:this.sel.y; c.getContext('2d').drawImage(s,sx,sy,this.sel.w,this.sel.h,0,0,this.sel.w,this.sel.h); c.toBlob(b=>navigator.clipboard.write([new ClipboardItem({'image/png':b})])); document.getElementById('stat-msg').textContent="コピーしました"; },
+    
+    render(){ const x=this.dCvs.getContext('2d'); x.clearRect(0,0,this.w,this.h); this.layers.forEach((l,i)=>{if(!l.vis)return; if(i===this.curL&&this.sel&&this.sel.float){x.drawImage(l.cvs,0,0); x.drawImage(this.sel.float,this.sel.x,this.sel.y,this.sel.w,this.sel.h);} else x.drawImage(l.cvs,0,0);}); },
+    cursorHover(p){ const g=document.getElementById('crs-guide'); if(p.x>=0&&p.x<this.w&&p.y>=0&&p.y<this.h){g.style.display='block';this.posOverlay(g,p.x-Math.floor(this.ps/2),p.y-Math.floor(this.ps/2),this.ps,this.ps);g.style.borderRadius=this.ps>1?'50%':'0';}else g.style.display='none'; },
+    posOverlay(e,x,y,w,h){ const r=this.vp.getBoundingClientRect(); const sx=(x-this.w/2)*this.zoom+this.tX+r.width/2; const sy=(y-this.h/2)*this.zoom+this.tY+r.height/2; e.style.left=sx+'px';e.style.top=sy+'px';e.style.width=(w*this.zoom)+'px';e.style.height=(h*this.zoom)+'px'; },
+    updateOverlays(){ const sg=document.getElementById('sel-guide'); if(this.sel){ sg.style.display='block';this.posOverlay(sg,this.sel.x,this.sel.y,this.sel.w,this.sel.h); document.querySelectorAll('.sel-handle').forEach(h=>{h.style.display='block';h.style.width='10px';h.style.height='10px';h.style.transform='translate(-5px,-5px)'}); this.posOverlay(document.getElementById('h-nw'),this.sel.x,this.sel.y,0,0); this.posOverlay(document.getElementById('h-ne'),this.sel.x+this.sel.w,this.sel.y,0,0); this.posOverlay(document.getElementById('h-sw'),this.sel.x,this.sel.y+this.sel.h,0,0); this.posOverlay(document.getElementById('h-se'),this.sel.x+this.sel.w,this.sel.y+this.sel.h,0,0); } else { sg.style.display='none'; document.querySelectorAll('.sel-handle').forEach(h=>h.style.display='none'); } },
+    
+    setTool(t){ this.tool=t; this.updateUI(); },
+    updateUI(){ ['pen','ers','fil','pick','sel','mov'].forEach(t=>document.getElementById('btn-'+t).className=this.tool==t?'act':''); },
+    setPs(s){ this.ps=parseInt(s); document.getElementById('pen-size-disp').innerText=s; },
+    setTol(t){ this.tol=parseInt(t); document.getElementById('tol-disp').innerText=t; },
+    inSel(p){ return this.sel&&p.x>=this.sel.x&&p.x<this.sel.x+this.sel.w&&p.y>=this.sel.y&&p.y<this.sel.y+this.sel.h; },
+
+    uiLayers(){ const el=document.getElementById('layer-list'); el.innerHTML=''; document.getElementById('layer-count').innerText=this.layers.length; [...this.layers].map((l,i)=>({l,i})).reverse().forEach(o=>{ const d=document.createElement('div'); d.className=`layer-item ${o.i===this.curL?'sel':''}`; d.onclick=e=>{if(e.target.tagName=='BUTTON'||e.target.classList.contains('layer-vis'))return; this.commitSel(); this.curL=o.i; this.uiLayers();}; const v=document.createElement('div'); v.className=`layer-vis ${o.l.vis?'':'hide'}`; v.innerText='👁️'; v.onclick=()=>{o.l.vis=!o.l.vis;this.render();this.uiLayers();}; const c=document.createElement('canvas');c.className='layer-thumb';c.width=this.w;c.height=this.h;c.getContext('2d').drawImage(o.l.cvs,0,0); const n=document.createElement('span');n.style.flex=1;n.innerText=`Layer ${o.i+1}`; const b=document.createElement('div');b.className='layer-ctrls'; b.innerHTML=`<button class="sm" onclick="pEditor.mvL(${o.i},1)">↑</button><button class="sm" onclick="pEditor.mvL(${o.i},-1)">↓</button><button class="sm dang" onclick="pEditor.delL(${o.i})">×</button>`; d.append(v,c,n,b); el.appendChild(d); }); },
+    addLayer(){ if(this.layers.length>=12)return; this.commitSel(); this.layers.push({cvs:this.mkCvs(),vis:true}); this.curL=this.layers.length-1; this.render(); this.uiLayers(); this.saveState(); },
+    mvL(i,d){ const t=i+d; if(t<0||t>=this.layers.length)return; [this.layers[i],this.layers[t]]=[this.layers[t],this.layers[i]]; if(this.curL===i)this.curL=t; else if(this.curL===t)this.curL=i; this.render(); this.uiLayers(); this.saveState(); },
+    delL(i){ if(this.layers.length<=1)return; this.commitSel(); this.layers.splice(i,1); if(this.curL===i)this.curL=Math.max(0,i-1); else if(this.curL>i)this.curL--; this.render(); this.uiLayers(); this.saveState(); },
+    delCurLayer(){ this.delL(this.curL); },
+    loadImgLayer(f){ if(f.type.startsWith('image')){ const img=new Image(); img.onload=()=>{ let dw=img.width, dh=img.height; if(dw>this.w||dh>this.h){const r=Math.min(this.w/dw,this.h/dh); dw=Math.floor(dw*r); dh=Math.floor(dh*r);} const c=this.mkCvs(); c.getContext('2d').drawImage(img,(this.w-dw)/2,(this.h-dh)/2,dw,dh); this.commitSel(); this.layers.push({cvs:c,vis:true}); this.curL=this.layers.length-1; this.render(); this.uiLayers(); this.saveState(); }; img.src=URL.createObjectURL(f); } },
+
+    saveState(){ if(this.history.length>20)this.history.shift(); this.history.push(this.layers.map(l=>({d:l.cvs.toDataURL(),v:l.vis}))); this.histIdx=this.history.length-1; },
+    undo(){ if(this.histIdx>0){ this.histIdx--; this.rest(this.history[this.histIdx]); } },
+    redo(){ if(this.histIdx<this.history.length-1){ this.histIdx++; this.rest(this.history[this.histIdx]); } },
+    async rest(s){ this.layers=await Promise.all(s.map(async x=>{const c=this.mkCvs();const i=new Image();i.src=x.d;await new Promise(r=>i.onload=r);c.getContext('2d').drawImage(i,0,0);return{cvs:c,vis:x.v}})); this.curL=Math.min(this.curL,this.layers.length-1); this.sel=null; this.render(); this.uiLayers(); }
+};
+</script>
+</body>
+</html>
